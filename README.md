@@ -13,36 +13,11 @@ use crypto::sha1;
 use crypto::digest::Digest;
 use bufstream::BufStream;
 
-// pub trait Transfer {
-//     fn write_file(&mut self, path:String) -> io::Result<usize>;
-// }
-
-// impl Transfer for TcpStream {
-//     fn write_file(&mut self, path:String) -> io::Result<usize> {
-//         const BUFFSIZE: usize = 1024 * 20;
-//         let mut file = File::open(path).expect("Couldn't open file.");
-//         let mut buf = [0; BUFFSIZE];
-//         let mut get_buffsize: usize = 0;
-//         get_buffsize = file.read(&mut buf).unwrap();
-//         loop {
-//             if get_buffsize == 0 {
-//                 break;
-//             }
-//             println!("{}", get_buffsize);
-//             self.write(&buf[..get_buffsize]).expect("Stream write failed!");
-//             self.flush();
-//             buf = [0; BUFFSIZE];
-//             get_buffsize = file.read(&mut buf).unwrap();
-//         }
-//         Ok(0)
-//     }
-// }
-
 fn main() {
-    let stream = TcpStream::connect("192.168.22.10:8000").unwrap();
+    let stream = TcpStream::connect("127.0.0.1:8000").unwrap();
     let mut buffer_stream = BufStream::new( stream );
 
-    let path = Path::new(r#"D:\VirtualBoxMachine\tmp_swap\Windows 7 x64-s008.vmdk"#);
+    let path = Path::new(r#"C:\test\libcrypto.lib"#);
 
     let start_time = time::SystemTime::now();
 
@@ -50,15 +25,16 @@ fn main() {
     let mut reader = BufReader::new(file);
 
     //file length
-    let file_length:u64 = reader.get_ref()
+    let file_length:usize = reader.get_ref()
                                 .metadata()
                                 .expect("failed to get meta data")
-                                .len();
+                                .len() as usize;
     //send file length
     buffer_stream.write(&file_length.to_be_bytes()).expect("failed to send file length");
     buffer_stream.flush().unwrap();
+    println!("send file length.");
 
-    //read buffer
+    //write buffer
     let buffsize: usize = 1024 * 32 ;
 
     //calculate sha1
@@ -66,6 +42,7 @@ fn main() {
 
     let mut buf = vec![0; buffsize];
     let mut get_buffsize = reader.read(&mut buf).unwrap();
+    println!("sending file...");
     loop {
         if get_buffsize == 0 {
             break
@@ -82,6 +59,7 @@ fn main() {
 
         //println!("{:?}", &buf[..]);
     }
+    println!("send file finished");
 
     let sha1_bytes = sha1_value.result_str().into_bytes();
     println!("sha1: {} {}", sha1_value.result_str(),sha1_value.result_str().len());
@@ -89,9 +67,10 @@ fn main() {
     //send sha1
     buffer_stream.write(&sha1_bytes).expect("failed to send sha1 value");
     buffer_stream.flush().unwrap();
-
+    println!("send sha1 bytes");
     //recv
     let mut status = [0];
+    println!("getting status");
     buffer_stream.read_exact(&mut status).expect("failed to get status of transfering file");
 
     let end_time = time::SystemTime::now();
@@ -104,56 +83,71 @@ fn main() {
 
 
 
-
 ---server
-use std::net::TcpStream;
-use std::fs::File;
-use std::io::{Read, Write, BufReader};
+use std::net::{TcpListener,TcpStream};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write, BufReader, BufWriter};
 use std::path::Path;
 use std::time;
 use crypto::sha1;
 use crypto::digest::Digest;
 use bufstream::BufStream;
 
-// pub trait Transfer {
-//     fn read_file(&mut self, path:String) -> io::Result<usize>;
-// }
-
-// impl Transfer for TcpStream {
-//     fn read_file(&mut self, path:String) -> io::Result<usize> {
-//     	const BUFFSIZE: usize = 1024 * 20;
-// 		let mut file = File::create(path).expect("Couldn't create file.");
-// 	    let mut buf = [0; BUFFSIZE];
-// 	    println!("memory address: {:p}", &buf);
-// 	    let mut get_buffsize: usize = 0;
-// 	    get_buffsize = self.read(&mut buf).unwrap();
-// 	    loop {
-// 	    	if get_buffsize == 0 {
-// 	    		break;
-// 	    	}
-// 	    	file.write(&buf[..get_buffsize]);
-// 	    	file.flush();
-// 	    	get_buffsize = self.read(&mut buf).unwrap();
-// 	    }
-// 	    Ok(0)
-//     }
-// }
-
 
 fn main() {
 	let listener = TcpListener::bind("0.0.0.0:8000").expect("Bind ip failed.");
 	for stream in listener.incoming() {
-    	let mut buffer_stream = BufStream::new( stream );
-	    let path = Path::new(r#"D:\VirtualBoxMachine\tmp_swap\test_recv.vmdk"#);
+    	let mut buf_stream = BufStream::new( stream.unwrap() );
+	    let path = Path::new(r#"C:\test\libcrypto111.lib"#);
+
+	    //file handler
+	    let file = OpenOptions::new().write(true).create(true).open(path).expect("failed to create file"); 
+	    let mut buf_file = BufWriter::new(file);
 
 	    //recv file length
 	    let mut length_bytes = [0;8];
-	    buffer_stream.read_exact(&mut length_bytes).expect("failed to recv file length");
-	    let length = u64::from_be_bytes( length_bytes );
+	    buf_stream.read_exact(&mut length_bytes).expect("failed to recv file length");
+	    let length = usize::from_be_bytes( length_bytes );
+	    println!("get file length");
 
+	    //write buffer
 	    let buffsize: usize = 1024 * 32 ;
+	    let mut buf = vec![0;buffsize];
+
+	    //calculate sha1
+    	let mut sha1_value = sha1::Sha1::new();
+
 	    //recv times
-    	let recv_times:u64 = (length as f32 / buffsize as f32).ceil() as u64;
+	    println!("recving file.");
+    	let recv_times:usize = (length as f32 / buffsize as f32).ceil() as usize;
+    	for c in 0..recv_times {
+    		buf_stream.read_exact(&mut buf).unwrap();
+    		let mut end:usize = 0;
+    		if (c+1)*buffsize >= length {
+    			end = length - c*buffsize;
+    		} else {
+    			end = buffsize;
+    		}
+			buf_file.write(&buf[..end]).unwrap();
+			buf_file.flush().unwrap();
+			sha1_value.input( &buf[..end] );
+
+    		for item in buf.iter_mut() {
+    			*item = 0;
+    		}
+    	}
+
+    	//recv sha1
+    	let mut sha1_bytes = [0;40];
+    	buf_stream.read_exact(&mut sha1_bytes).unwrap();
+    	println!("get sha1 bytes.");
+    	println!("{:?}", String::from_utf8(sha1_bytes.to_vec()).unwrap() );
+    	println!("{:?}", sha1_value.result_str());
+
+    	let mut status = [0];
+    	buf_stream.write(&status).unwrap();
+    	buf_stream.flush().unwrap();
+
 	}
 
 }
